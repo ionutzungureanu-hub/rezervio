@@ -1739,9 +1739,20 @@ function Drawer(props) {
   var syncColor = props.syncColor, syncLabel = props.syncLabel;
   var cs = useState(false);
   var calOpen = cs[0], setCalOpen = cs[1];
+  // accordion: 'rooms' | 'sources' | 'sync' | null — un singur panou deschis
+  var acs = useState(null);
+  var accordionOpen = acs[0], setAccordionOpen = acs[1];
   var obCount = conflicts.length;
 
   function navTo(t) { setTab(t); props.onClose(); }
+  function toggleAccordion(key) { setAccordionOpen(accordionOpen === key ? null : key); }
+
+  // cate platforme de sincronizare au cel putin un link configurat
+  var icalLinksV2 = lc.get('ical_links_v2', null);
+  var connectedPlatforms = SYNC_PLATFORMS.filter(function(p) {
+    if (!icalLinksV2 || !icalLinksV2[p.id]) return false;
+    return Object.keys(icalLinksV2[p.id]).some(function(r) { return icalLinksV2[p.id][r]; });
+  });
 
   return h(Fragment, null,
     h('div', { className: 'dbg', onClick: props.onClose }),
@@ -1755,40 +1766,9 @@ function Drawer(props) {
         )
       ),
       h('div', { className: 'drw-body' },
-        // SURSE
-        h('div', { className: 'dlbl' }, 'Surse active'),
-        h('div', { className: 'dchips' },
-          sources.map(function(s, i) {
-            var c = PAL[i % PAL.length];
-            return h('span', { key: s, className: 'dchip', style: { background: c.light, color: c.text } }, s);
-          })
-        ),
-        h('div', { className: 'ditem', onClick: function() { props.onOpenSrc(); props.onClose(); } },
-          h('span', { className: 'dico' }, '\uD83D\uDC64'),
-          h('div', { className: 'dtxt' },
-            h('div', { className: 'dnm' }, 'Gestioneaza surse'),
-            h('div', { className: 'dsub' }, 'Adauga sau sterge surse')
-          ),
-          h('span', { className: 'darr' }, '›')
-        ),
-        h('div', { className: 'ddiv' }),
-        // CAMERE
-        h('div', { className: 'dlbl' }, 'Camere'),
-        h('div', { className: 'dtags' },
-          rooms.map(function(r) { return h('span', { key: r, className: 'dtag' }, r); })
-        ),
-        h('div', { className: 'ditem', onClick: function() { props.onOpenRooms(); props.onClose(); } },
-          h('span', { className: 'dico' }, '\uD83D\uDEAA'),
-          h('div', { className: 'dtxt' },
-            h('div', { className: 'dnm' }, 'Gestioneaza camere'),
-            h('div', { className: 'dsub' }, 'Adauga sau sterge camere')
-          ),
-          h('span', { className: 'darr' }, '›')
-        ),
-        h('div', { className: 'ddiv' }),
-        // NAV
+
+        // ── NAV PRINCIPAL ──
         h('div', { className: 'dlbl' }, 'Navigare'),
-        // Rezervari
         h('div', { className: 'ditem' + (tab === 'rez' ? ' on' : ''), onClick: function() { navTo('rez'); } },
           h('span', { className: 'dico' }, '\uD83D\uDCCB'),
           h('div', { className: 'dtxt' },
@@ -1797,7 +1777,6 @@ function Drawer(props) {
           ),
           obCount > 0 && h('span', { className: 'dbdg' }, obCount + ' OB')
         ),
-        // Calendar (cascade)
         h('div', { className: 'ditem' + (tab.startsWith('cal') ? ' on' : ''), onClick: function() { setCalOpen(!calOpen); } },
           h('span', { className: 'dico' }, '\uD83D\uDCC5'),
           h('div', { className: 'dtxt' },
@@ -1814,7 +1793,6 @@ function Drawer(props) {
             );
           })
         ),
-        // Statistici
         h('div', { className: 'ditem' + (tab === 'stats' ? ' on' : ''), onClick: function() { navTo('stats'); } },
           h('span', { className: 'dico' }, '\uD83D\uDCCA'),
           h('div', { className: 'dtxt' },
@@ -1822,18 +1800,89 @@ function Drawer(props) {
             h('div', { className: 'dsub' }, 'Venituri, nopti, surse')
           )
         ),
+
         h('div', { className: 'ddiv' }),
-        // iCal Booking
-        h('div', { className: 'ditem', onClick: function() { props.onOpenIcal(); props.onClose(); } },
-          h('span', { className: 'dico' }, '\uD83D\uDCC5'),
+
+        // ── ACCORDION: CAMERE ──
+        h('div', { className: 'dlbl' }, 'Configurare'),
+        h('div', { className: 'ditem' + (accordionOpen === 'rooms' ? ' on' : ''), onClick: function() { toggleAccordion('rooms'); } },
+          h('span', { className: 'dico' }, '\uD83D\uDEAA'),
           h('div', { className: 'dtxt' },
-            h('div', { className: 'dnm' }, 'Sincronizare Booking.com'),
-            h('div', { className: 'dsub' }, 'Import/export iCal')
+            h('div', { className: 'dnm' }, 'Camere'),
+            h('div', { className: 'dsub' }, rooms.length + ' camere configurate')
           ),
-          h('span', { className: 'darr' }, '›')
+          h('span', { className: 'darr' }, accordionOpen === 'rooms' ? '\u2303' : '\u2304')
         ),
+        accordionOpen === 'rooms' && h('div', { className: 'dexp' },
+          rooms.map(function(r) {
+            return h('div', { key: r, className: 'dsub-item', style: { justifyContent: 'space-between' } },
+              h('span', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+                h('span', { style: { fontSize: 15 } }, '\uD83D\uDEAA'),
+                h('span', { className: 'dsub-lbl' }, r)
+              )
+            );
+          }),
+          h('div', { className: 'dsub-item', style: { color: '#2563eb', fontWeight: 700 }, onClick: function() { props.onOpenRooms(); props.onClose(); } },
+            h('span', { style: { fontSize: 15 } }, '\u270F\uFE0F'),
+            h('span', { className: 'dsub-lbl' }, 'Adauga / editeaza / sterge camere')
+          )
+        ),
+
+        // ── ACCORDION: SURSE ──
+        h('div', { className: 'ditem' + (accordionOpen === 'sources' ? ' on' : ''), onClick: function() { toggleAccordion('sources'); } },
+          h('span', { className: 'dico' }, '\uD83D\uDC64'),
+          h('div', { className: 'dtxt' },
+            h('div', { className: 'dnm' }, 'Surse'),
+            h('div', { className: 'dsub' }, sources.length + ' surse active')
+          ),
+          h('span', { className: 'darr' }, accordionOpen === 'sources' ? '\u2303' : '\u2304')
+        ),
+        accordionOpen === 'sources' && h('div', { className: 'dexp' },
+          sources.map(function(s, i) {
+            var c = PAL[i % PAL.length];
+            return h('div', { key: s, className: 'dsub-item' },
+              h('span', { className: 'dchip', style: { background: c.light, color: c.text, fontSize: 12 } }, s)
+            );
+          }),
+          h('div', { className: 'dsub-item', style: { color: '#2563eb', fontWeight: 700 }, onClick: function() { props.onOpenSrc(); props.onClose(); } },
+            h('span', { style: { fontSize: 15 } }, '\u270F\uFE0F'),
+            h('span', { className: 'dsub-lbl' }, 'Adauga / editeaza / sterge surse')
+          )
+        ),
+
+        // ── ACCORDION: SINCRONIZARI ──
+        h('div', { className: 'ditem' + (accordionOpen === 'sync' ? ' on' : ''), onClick: function() { toggleAccordion('sync'); } },
+          h('span', { className: 'dico' }, '\uD83D\uDD04'),
+          h('div', { className: 'dtxt' },
+            h('div', { className: 'dnm' }, 'Sincronizari'),
+            h('div', { className: 'dsub' }, connectedPlatforms.length > 0 ? (connectedPlatforms.length + ' platforme conectate') : 'Niciuna conectata')
+          ),
+          h('span', { className: 'darr' }, accordionOpen === 'sync' ? '\u2303' : '\u2304')
+        ),
+        accordionOpen === 'sync' && h('div', { className: 'dexp' },
+          SYNC_PLATFORMS.map(function(p) {
+            var connected = connectedPlatforms.some(function(cp) { return cp.id === p.id; });
+            return h('div', { key: p.id, className: 'dsub-item', style: { justifyContent: 'space-between' }, onClick: function() { props.onOpenIcal(); props.onClose(); } },
+              h('span', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+                h('span', { style: { fontSize: 15 } }, p.icon),
+                h('span', { className: 'dsub-lbl' }, p.name)
+              ),
+              h('span', { style: { display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, color: connected ? '#16a34a' : '#94a3b8' } },
+                h('span', { style: { width: 6, height: 6, borderRadius: '50%', background: connected ? '#16a34a' : '#cbd5e1' } }),
+                connected ? 'Conectat' : 'Neconectat'
+              )
+            );
+          }),
+          h('div', { className: 'dsub-item', style: { color: '#2563eb', fontWeight: 700 }, onClick: function() { props.onOpenIcal(); props.onClose(); } },
+            h('span', { style: { fontSize: 15 } }, '\u2699\uFE0F'),
+            h('span', { className: 'dsub-lbl' }, 'Gestioneaza sincronizarile')
+          )
+        ),
+
         h('div', { className: 'ddiv' }),
-        // Descarca rezervari
+
+        // ── ALTE OPTIUNI ──
+        h('div', { className: 'dlbl' }, 'Altele'),
         h('div', { className: 'ditem', onClick: function() { props.onOpenPdf(); props.onClose(); } },
           h('span', { className: 'dico' }, '\uD83D\uDDA8'),
           h('div', { className: 'dtxt' },
@@ -1842,8 +1891,6 @@ function Drawer(props) {
           ),
           h('span', { className: 'darr' }, '›')
         ),
-        h('div', { className: 'ddiv' }),
-        // Link rezervare clienti
         h('div', { className: 'ditem', onClick: function() { props.onOpenPrices(); props.onClose(); } },
           h('span', { className: 'dico' }, '\uD83D\uDD17'),
           h('div', { className: 'dtxt' },
@@ -1858,8 +1905,9 @@ function Drawer(props) {
   );
 }
 
+
 // ── ICAL CONSTANTS ───────────────────────────────────────────────────────────
-// Linkurile iCal Booking.com per camera (hard-coded, editabile din drawer)
+// Linkurile iCal per camera, per platforma (editabile din drawer)
 var ICAL_PROXY = '/.netlify/functions/ical-proxy?url=';
 var DEF_ICAL_LINKS = {
   'Camera 1': 'https://ical.booking.com/v1/export?t=b68efa81-896c-4473-a559-aeeabfabfead',
@@ -1867,6 +1915,13 @@ var DEF_ICAL_LINKS = {
   'Camera 3': 'https://ical.booking.com/v1/export?t=a439eb0c-32b4-411f-82d5-3bf62aaaba24',
   'Camera 4': 'https://ical.booking.com/v1/export?t=dfa8919e-6d67-4a0a-9b73-facc06f25323'
 };
+
+// Platforme suportate pentru sincronizare iCal
+var SYNC_PLATFORMS = [
+  { id: 'booking', name: 'Booking.com', icon: '🔵', color: '#003580', importLabel: 'Calendar → Sync calendar → Import calendar', host: 'admin.booking.com' },
+  { id: 'airbnb', name: 'Airbnb', icon: '🔴', color: '#FF385C', importLabel: 'Calendar → Availability → Import calendar', host: 'airbnb.com/hosting' },
+  { id: 'other', name: 'Alta platforma (iCal generic)', icon: '🟣', color: '#7c3aed', importLabel: 'Cauta sectiunea "Sync calendar" sau "iCal"', host: '' }
+];
 
 // ── ICAL PARSER ──────────────────────────────────────────────────────────────
 function parseIcal(text) {
@@ -2129,15 +2184,21 @@ function generateIcal(reservations) {
 function ICalMgr(props) {
   var rooms = props.rooms, reservations = props.reservations, onClose = props.onClose;
 
-  // Base URL for the export function
   var BASE_URL = window.location.origin;
   var EXPORT_BASE = BASE_URL + '/.netlify/functions/ical-export';
 
-  // Load saved iCal import links from localStorage, fallback to defaults
+  // Linkuri de import, separate per platforma: { booking: {Camera1:..}, airbnb: {...}, other: {...} }
   var initLinks = function() {
-    var saved = lc.get('ical_links', {});
-    var links = {};
-    rooms.forEach(function(r) { links[r] = saved[r] || DEF_ICAL_LINKS[r] || ''; });
+    var saved = lc.get('ical_links_v2', null);
+    if (saved) return saved;
+    // Migrare din formatul vechi (doar booking)
+    var oldLinks = lc.get('ical_links', {});
+    var links = { booking: {}, airbnb: {}, other: {} };
+    rooms.forEach(function(r) {
+      links.booking[r] = oldLinks[r] || DEF_ICAL_LINKS[r] || '';
+      links.airbnb[r] = '';
+      links.other[r] = '';
+    });
     return links;
   };
   var lks = useState(initLinks);
@@ -2145,17 +2206,32 @@ function ICalMgr(props) {
   var ss = useState('idle'); var syncState = ss[0], setSyncState = ss[1];
   var sm = useState(''); var syncMsg = sm[0], setSyncMsg = sm[1];
   var ts = useState('import'); var activeTab = ts[0], setActiveTab = ts[1];
+  var pf = useState('booking'); var platform = pf[0], setPlatform = pf[1];
   var cp = useState(''); var copied = cp[0], setCopied = cp[1];
 
-  function saveLinks() { lc.set('ical_links', links); }
+  var curPlatform = SYNC_PLATFORMS.filter(function(p) { return p.id === platform; })[0];
+
+  function saveLinks() { lc.set('ical_links_v2', links); }
+
+  function setLink(plat, room, val) {
+    var nl = Object.assign({}, links);
+    nl[plat] = Object.assign({}, nl[plat]);
+    nl[plat][room] = val;
+    setLinks(nl);
+  }
+
+  function isConnected(plat) {
+    return rooms.some(function(r) { return links[plat] && links[plat][r]; });
+  }
 
   function handleSync() {
     saveLinks();
     setSyncState('syncing');
-    setSyncMsg('Se importa rezervarile din Booking.com...');
+    setSyncMsg('Se importa rezervarile din ' + curPlatform.name + '...');
     var totalAdded = 0, totalRemoved = 0, totalEvents = 0;
+    var plLinks = links[platform] || {};
     var promises = rooms.map(function(room) {
-      var url = links[room];
+      var url = plLinks[room];
       if (!url) return Promise.resolve();
       return syncIcalRoom(room, url, reservations, fb.push, fb.set, fb.remove)
         .then(function(result) {
@@ -2170,7 +2246,7 @@ function ICalMgr(props) {
       setSyncState('done');
       setSyncMsg(
         '\u2713 Sincronizare finalizata!\n' +
-        totalEvents + ' evenimente Booking | ' +
+        totalEvents + ' evenimente ' + curPlatform.name + ' | ' +
         totalAdded + ' adaugate | ' +
         totalRemoved + ' sterse (anulate)'
       );
@@ -2185,7 +2261,6 @@ function ICalMgr(props) {
       setCopied(txt);
       setTimeout(function() { setCopied(''); }, 2000);
     }).catch(function() {
-      // fallback
       var el = document.createElement('textarea');
       el.value = txt; document.body.appendChild(el);
       el.select(); document.execCommand('copy');
@@ -2206,75 +2281,106 @@ function ICalMgr(props) {
   return h('div', { className: 'ov', onClick: onClose },
     h('div', { className: 'mdl', onClick: function(e) { e.stopPropagation(); } },
       h('div', { className: 'mhdr' },
-        h('span', { className: 'mtit' }, '\uD83D\uDCC5 Sincronizare Booking.com'),
+        h('span', { className: 'mtit' }, '\uD83D\uDD04 Sincronizari platforme'),
         h('button', { className: 'mclose', onClick: onClose }, '\u2715')
       ),
       h('div', { className: 'mbody' },
 
+        // ── SELECTOR PLATFORMA ──
+        h('div', { style: { fontSize: 13, fontWeight: 700, color: '#1e3a5f', marginBottom: 8 } }, 'Alege platforma:'),
+        h('div', { style: { display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' } },
+          SYNC_PLATFORMS.map(function(p) {
+            var active = platform === p.id;
+            var connected = isConnected(p.id);
+            return h('button', {
+              key: p.id,
+              onClick: function() { setPlatform(p.id); setSyncState('idle'); },
+              style: {
+                display: 'flex', alignItems: 'center', gap: 6, padding: '10px 12px', borderRadius: 10,
+                border: active ? ('2px solid ' + p.color) : '2px solid #e2e8f0',
+                background: active ? (p.color + '0d') : '#fff',
+                color: active ? p.color : '#475569',
+                fontWeight: 700, fontSize: 13, cursor: 'pointer', position: 'relative'
+              }
+            },
+              h('span', null, p.icon),
+              h('span', null, p.name),
+              connected && h('span', { style: { width: 7, height: 7, borderRadius: '50%', background: '#16a34a', marginLeft: 2 } })
+            );
+          })
+        ),
+
+        // Status conectare platforma curenta
+        h('div', { style: {
+          display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 8, marginBottom: 14,
+          background: isConnected(platform) ? '#f0fdf4' : '#f8fafc',
+          border: '1.5px solid ' + (isConnected(platform) ? '#bbf7d0' : '#e2e8f0'),
+          fontSize: 12, fontWeight: 700,
+          color: isConnected(platform) ? '#16a34a' : '#94a3b8'
+        } },
+          h('span', { style: { width: 7, height: 7, borderRadius: '50%', background: isConnected(platform) ? '#16a34a' : '#cbd5e1' } }),
+          isConnected(platform) ? (curPlatform.name + ' conectat - cel putin o camera are link configurat') : (curPlatform.name + ' neconectat - adauga linkuri mai jos')
+        ),
+
         // Tab switcher Import / Export
         h('div', { style: { display: 'flex', background: '#f1f5f9', borderRadius: 10, padding: 3, gap: 2, marginBottom: 16 } },
-          h('button', { style: tabStyle(activeTab === 'import'), onClick: function() { setActiveTab('import'); } }, '\uD83D\uDD04 Import din Booking'),
-          h('button', { style: tabStyle(activeTab === 'export'), onClick: function() { setActiveTab('export'); } }, '\uD83D\uDCE4 Export spre Booking')
+          h('button', { style: tabStyle(activeTab === 'import'), onClick: function() { setActiveTab('import'); } }, '\uD83D\uDD04 Import din ' + curPlatform.name),
+          h('button', { style: tabStyle(activeTab === 'export'), onClick: function() { setActiveTab('export'); } }, '\uD83D\uDCE4 Export spre ' + curPlatform.name)
         ),
 
         // ── IMPORT TAB ──
         activeTab === 'import' && h('div', null,
           h('div', { className: 'ibox', style: { marginBottom: 14 } },
-            '\uD83D\uDD04 Booking.com trimite rezervarile spre aplicatie.',
-            h('br'), 'Apasa "Importa acum" pentru a sincroniza manual.'
+            '\uD83D\uDD04 ' + curPlatform.name + ' trimite rezervarile spre aplicatie prin link iCal.',
+            h('br'), 'Apasa "Importa acum" pentru a sincroniza manual.',
+            platform === 'other' && h(Fragment, null, h('br'), h('i', null, 'Functioneaza cu orice platforma care ofera export iCal standard (.ics).'))
           ),
           h('div', { style: { marginBottom: 14 } },
-            h('div', { style: { fontSize: 13, fontWeight: 700, color: '#1e3a5f', marginBottom: 10 } }, 'Linkuri iCal Booking per camera:'),
+            h('div', { style: { fontSize: 13, fontWeight: 700, color: '#1e3a5f', marginBottom: 10 } }, 'Linkuri iCal ' + curPlatform.name + ' per camera:'),
             rooms.map(function(room) {
               return h('div', { key: room, style: { marginBottom: 10 } },
                 h('label', { className: 'flbl', style: { marginBottom: 4, display: 'block' } }, room),
                 h('input', {
                   className: 'finp', style: { fontSize: 13 },
-                  value: links[room] || '',
-                  placeholder: 'https://ical.booking.com/v1/export?t=...',
-                  onChange: function(e) {
-                    var nl = Object.assign({}, links);
-                    nl[room] = e.target.value;
-                    setLinks(nl);
-                  }
+                  value: (links[platform] && links[platform][room]) || '',
+                  placeholder: platform === 'booking' ? 'https://ical.booking.com/v1/export?t=...' : platform === 'airbnb' ? 'https://www.airbnb.com/calendar/ical/...' : 'https://...ics',
+                  onChange: function(e) { setLink(platform, room, e.target.value); }
                 })
               );
             })
           ),
           syncState !== 'idle' && h('div', {
             style: {
-              padding: '10px 14px', borderRadius: 9, fontSize: 14, marginBottom: 14,
+              padding: '10px 14px', borderRadius: 9, fontSize: 14, marginBottom: 14, whiteSpace: 'pre-line',
               background: syncState === 'done' ? '#f0fdf4' : syncState === 'error' ? '#fef2f2' : '#fffbeb',
               color: syncState === 'done' ? '#16a34a' : syncState === 'error' ? '#dc2626' : '#92400e',
               border: '1.5px solid ' + (syncState === 'done' ? '#bbf7d0' : syncState === 'error' ? '#fecaca' : '#fde68a')
             }
           }, syncMsg),
           h('button', {
-            style: { width: '100%', padding: '13px', background: syncState === 'syncing' ? '#94a3b8' : '#2563eb', color: '#fff', borderRadius: 11, fontWeight: 800, fontSize: 15, border: 'none', cursor: 'pointer' },
+            style: { width: '100%', padding: '13px', background: syncState === 'syncing' ? '#94a3b8' : curPlatform.color, color: '#fff', borderRadius: 11, fontWeight: 800, fontSize: 15, border: 'none', cursor: 'pointer' },
             disabled: syncState === 'syncing',
             onClick: handleSync
-          }, syncState === 'syncing' ? '\u23F3 Se importa...' : '\uD83D\uDD04 Importa acum din Booking')
+          }, syncState === 'syncing' ? '\u23F3 Se importa...' : '\uD83D\uDD04 Importa acum din ' + curPlatform.name)
         ),
 
         // ── EXPORT TAB ──
         activeTab === 'export' && h('div', null,
           h('div', { className: 'ibox', style: { marginBottom: 14 } },
-            '\uD83D\uDCE4 Booking.com citeste aceste linkuri si blocheaza automat zilele ocupate.',
-            h('br'), h('strong', null, 'Copiaza linkul fiecarei camere si adauga-l in Booking.com.')
+            '\uD83D\uDCE4 ' + curPlatform.name + ' citeste aceste linkuri si blocheaza automat zilele ocupate.',
+            h('br'), h('strong', null, 'Copiaza linkul fiecarei camere si adauga-l in ' + curPlatform.name + '.')
           ),
 
-          // Step instructions
           h('div', { style: { background: '#fffbeb', border: '1.5px solid #fbbf24', borderRadius: 10, padding: '12px 14px', marginBottom: 16, fontSize: 13, color: '#92400e', lineHeight: 1.6 } },
-            h('b', null, '\uD83D\uDCCB Cum adaugi in Booking.com:'), h('br'),
-            '1. Mergi la ', h('b', null, 'admin.booking.com'), h('br'),
-            '2. ', h('b', null, 'Calendar'), ' \u2192 ', h('b', null, 'Sync calendar'), ' \u2192 ', h('b', null, 'Import calendar'), h('br'),
-            '3. Lipeste linkul camerei respective', h('br'),
-            '4. Booking va actualiza automat la fiecare \u223C2 ore'
+            h('b', null, '\uD83D\uDCCB Cum adaugi in ' + curPlatform.name + ':'), h('br'),
+            curPlatform.host && h(Fragment, null, '1. Mergi la ', h('b', null, curPlatform.host), h('br')),
+            (curPlatform.host ? '2. ' : '1. ') + curPlatform.importLabel, h('br'),
+            (curPlatform.host ? '3' : '2') + '. Lipeste linkul camerei respective', h('br'),
+            (curPlatform.host ? '4' : '3') + '. Sincronizarea se actualizeaza automat la fiecare \u223C2 ore'
           ),
 
-          // Export links per room
           rooms.map(function(room) {
-            var exportUrl = EXPORT_BASE + '?room=' + encodeURIComponent(room);
+            var exportUrl = EXPORT_BASE + '?room=' + encodeURIComponent(room) + '&platform=' + platform;
             var isCopied = copied === exportUrl;
             return h('div', { key: room, style: { marginBottom: 14, background: '#f8fafc', borderRadius: 10, padding: '12px 14px', border: '1.5px solid #e2e8f0' } },
               h('div', { style: { fontSize: 14, fontWeight: 700, color: '#1e3a5f', marginBottom: 8 } }, '\uD83D\uDEAA ' + room),
@@ -2289,7 +2395,7 @@ function ICalMgr(props) {
                 h('button', {
                   style: {
                     padding: '10px 14px', borderRadius: 9, fontWeight: 700, fontSize: 13,
-                    background: isCopied ? '#16a34a' : '#2563eb', color: '#fff',
+                    background: isCopied ? '#16a34a' : curPlatform.color, color: '#fff',
                     border: 'none', cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap'
                   },
                   onClick: function() { copyLink(exportUrl); }
@@ -2298,7 +2404,6 @@ function ICalMgr(props) {
             );
           }),
 
-          // All rooms link
           h('div', { style: { marginBottom: 14, background: '#eff6ff', borderRadius: 10, padding: '12px 14px', border: '1.5px solid #bfdbfe' } },
             h('div', { style: { fontSize: 14, fontWeight: 700, color: '#1e3a5f', marginBottom: 8 } }, '\uD83C\uDFE0 Toate camerele (link general)'),
             h('div', { style: { display: 'flex', gap: 6, alignItems: 'center' } },
@@ -2306,28 +2411,34 @@ function ICalMgr(props) {
                 className: 'finp',
                 style: { fontSize: 12, color: '#64748b', background: '#fff', flex: 1 },
                 readOnly: true,
-                value: EXPORT_BASE,
+                value: EXPORT_BASE + '?platform=' + platform,
                 onFocus: function(e) { e.target.select(); }
               }),
               h('button', {
                 style: {
                   padding: '10px 14px', borderRadius: 9, fontWeight: 700, fontSize: 13,
-                  background: copied === EXPORT_BASE ? '#16a34a' : '#2563eb', color: '#fff',
+                  background: copied === (EXPORT_BASE + '?platform=' + platform) ? '#16a34a' : curPlatform.color, color: '#fff',
                   border: 'none', cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap'
                 },
-                onClick: function() { copyLink(EXPORT_BASE); }
-              }, copied === EXPORT_BASE ? '\u2713 Copiat!' : '\uD83D\uDCCB Copiaza')
+                onClick: function() { copyLink(EXPORT_BASE + '?platform=' + platform); }
+              }, copied === (EXPORT_BASE + '?platform=' + platform) ? '\u2713 Copiat!' : '\uD83D\uDCCB Copiaza')
             )
           ),
 
-          // Important note about env variable
           h('div', { style: { background: '#fef2f2', border: '1.5px solid #fecaca', borderRadius: 10, padding: '12px 14px', fontSize: 13, color: '#991b1b', lineHeight: 1.6 } },
             h('b', null, '\u26A0\uFE0F Configurare necesara (o singura data):'), h('br'),
             'In Netlify \u2192 Site settings \u2192 ', h('b', null, 'Environment variables'), ' \u2192 Add variable:', h('br'),
             h('code', { style: { background: '#fee2e2', padding: '2px 6px', borderRadius: 4, fontFamily: 'monospace', fontSize: 12 } },
-              'FIREBASE_DB_URL = https://pensiunea-mea-default-rtdb.europe-west1.firebasedatabase.app'
+              'FIREBASE_DB_URL = https://master-rezervari-default-rtdb.europe-west1.firebasedatabase.app'
             )
           )
+        ),
+
+        // ── NOTA API OFICIAL ──
+        h('div', { style: { marginTop: 18, background: '#f5f3ff', border: '1.5px solid #ddd6fe', borderRadius: 10, padding: '12px 14px', fontSize: 12.5, color: '#5b21b6', lineHeight: 1.6 } },
+          h('b', null, '\u2139\uFE0F Despre sincronizare iCal vs. API oficial:'), h('br'),
+          'Aceasta metoda (iCal) sincronizeaza disponibilitatea la fiecare \u223C2 ore, gratuit, fara aprobare. ',
+          'Pentru sincronizare instant + preturi + mesagerie cu oaspeti, ' + curPlatform.name + ' ofera un API oficial, dar necesita inrolare ca Channel Manager certificat (proces separat, de obicei pentru companii cu portofolii mari de proprietati).'
         )
       ),
       h('div', { className: 'mfoot' },

@@ -323,13 +323,23 @@ var lc = {
 // ── FIREBASE OPS ─────────────────────────────────────────────────────────────
 var fb = {
   on: function(path, cb) {
+    if (!PENSION_ID) { console.warn('fb.on called before PENSION_ID set:', path); return function(){}; }
     var ref = firebaseDB.ref('pensions/' + PENSION_ID + '/' + path);
-    ref.on('value', function(s) { cb(s.val()); });
+    ref.on('value', function(s) { cb(s.val()); }, function(err) { console.error('fb.on error:', path, err); });
     return function() { ref.off('value'); };
   },
-  set: function(path, val) { return firebaseDB.ref('pensions/' + PENSION_ID + '/' + path).set(val); },
-  push: function(path, val) { return firebaseDB.ref('pensions/' + PENSION_ID + '/' + path).push(val).then(function(r) { return r.key; }); },
-  remove: function(path) { return firebaseDB.ref('pensions/' + PENSION_ID + '/' + path).remove(); }
+  set: function(path, val) {
+    if (!PENSION_ID) return Promise.reject(new Error('Nu esti autentificat (PENSION_ID lipsa). Reincarca pagina.'));
+    return firebaseDB.ref('pensions/' + PENSION_ID + '/' + path).set(val);
+  },
+  push: function(path, val) {
+    if (!PENSION_ID) return Promise.reject(new Error('Nu esti autentificat (PENSION_ID lipsa). Reincarca pagina.'));
+    return firebaseDB.ref('pensions/' + PENSION_ID + '/' + path).push(val).then(function(r) { return r.key; });
+  },
+  remove: function(path) {
+    if (!PENSION_ID) return Promise.reject(new Error('Nu esti autentificat (PENSION_ID lipsa). Reincarca pagina.'));
+    return firebaseDB.ref('pensions/' + PENSION_ID + '/' + path).remove();
+  }
 };
 
 // ── HELPERS ──────────────────────────────────────────────────────────────────
@@ -2490,7 +2500,13 @@ function App() {
     setSync('syncing');
     var cfg = { rooms: r, sources: s };
     if (prices !== undefined) cfg.roomPrices = prices;
-    return fb.set('config', cfg).then(function() { setSync('online'); });
+    return fb.set('config', cfg).then(function() { setSync('online'); }).catch(function(err) {
+      console.error('saveConfig error:', err);
+      setSync('error');
+      setTimeout(function() { setSync('online'); }, 4000);
+      alert('Eroare la salvare: ' + err.message);
+      throw err;
+    });
   }
 
   var conflicts = useMemo(function() {
@@ -2527,7 +2543,12 @@ function App() {
       var rest2 = Object.assign({}, data); delete rest2.id;
       p = fb.push('reservations', Object.assign(rest2, { createdAt: Date.now() }));
     }
-    p.then(function() { setSync('online'); setModal(null); }).catch(function() { alert('Eroare la salvare.'); setSync('online'); });
+    p.then(function() { setSync('online'); setModal(null); }).catch(function(err) {
+      console.error('saveRes error:', err);
+      setSync('error');
+      setTimeout(function() { setSync('online'); }, 4000);
+      alert('Eroare la salvare: ' + err.message);
+    });
   }
 
   function delRes(id, name) {
@@ -2536,7 +2557,12 @@ function App() {
       okLbl: 'Sterge',
       ok: function() {
         setSync('syncing');
-        fb.remove('reservations/' + id).then(function() { setSync('online'); setConfirm(null); });
+        fb.remove('reservations/' + id).then(function() { setSync('online'); setConfirm(null); }).catch(function(err) {
+          console.error('delRes error:', err);
+          setSync('online');
+          setConfirm(null);
+          alert('Eroare la stergere: ' + err.message);
+        });
       }
     });
   }
@@ -2545,14 +2571,23 @@ function App() {
     var del = rooms.filter(function(r) { return !newR.includes(r); });
     var promises = del.length ? reservations.filter(function(r) { return del.includes(r.room); }).map(function(r) { return fb.remove('reservations/' + r.id); }) : [];
     Promise.all(promises).then(function() {
-      setRooms(newR); lc.set('p_rooms', newR);
       return saveConfig(newR, sources, roomPrices);
-    }).then(function() { setShowRooms(false); });
+    }).then(function() {
+      setRooms(newR); lc.set('p_rooms', newR);
+      setShowRooms(false);
+    }).catch(function(err) {
+      console.error('saveRooms error:', err);
+      // Eroare deja afisata de saveConfig; nu inchidem modalul ca userul sa poata reincerca
+    });
   }
 
   function saveSrc(newS) {
-    setSources(newS); lc.set('p_src', newS);
-    saveConfig(rooms, newS, roomPrices).then(function() { setShowSrc(false); });
+    saveConfig(rooms, newS, roomPrices).then(function() {
+      setSources(newS); lc.set('p_src', newS);
+      setShowSrc(false);
+    }).catch(function(err) {
+      console.error('saveSrc error:', err);
+    });
   }
 
   function openNew(room) { setModal({ mode: 'new', data: Object.assign({}, EMPTY_RES, { room: room || '', source: sources[0] || '' }) }); }
@@ -2560,8 +2595,8 @@ function App() {
   function openCopy(r) { setModal({ mode: 'copy', data: Object.assign({}, r, { id: null }) }); }
   function openMove(r) { setModal({ mode: 'move', data: Object.assign({}, r) }); }
 
-  var syncColor = { online: '#22c55e', syncing: '#f59e0b', offline: '#ef4444' }[sync];
-  var syncLabel = { online: 'Sincronizat', syncing: 'Se salveaza...', offline: 'Offline' }[sync];
+  var syncColor = { online: '#22c55e', syncing: '#f59e0b', offline: '#ef4444', error: '#ef4444' }[sync] || '#94a3b8';
+  var syncLabel = { online: 'Sincronizat', syncing: 'Se salveaza...', offline: 'Offline', error: 'Eroare salvare' }[sync] || sync;
   var pageLabels = { rez: 'Rezervari', 'cal-month': 'Calendar lunar', 'cal-week': 'Calendar saptamanal', 'cal-custom': 'Calendar interval', stats: 'Statistici' };
   var calViewMap = { 'cal-month': 'month', 'cal-week': 'week', 'cal-custom': 'custom' };
 
@@ -2642,23 +2677,30 @@ function App() {
       pensionName: 'Casuta cu Izvor',
       pendingRes: reservations.filter(function(r){ return r.pendingConfirmation; }),
       onSave: function(newPrices) {
-        setRoomPrices(newPrices);
-        lc.set('p_prices', newPrices);
-        saveConfig(rooms, sources, newPrices);
+        saveConfig(rooms, sources, newPrices).then(function() {
+          setRoomPrices(newPrices);
+          lc.set('p_prices', newPrices);
+        }).catch(function(err) { console.error('PricesMgr save error:', err); });
       },
       onConfirmPending: function(res) {
         // Convert pending to confirmed reservation
         var id = res.id;
         var updated = Object.assign({}, res, { pendingConfirmation: false, status: 'occupied' });
         delete updated.id;
-        fb.set('reservations/' + id, updated);
+        fb.set('reservations/' + id, updated).catch(function(err) {
+          console.error('onConfirmPending error:', err);
+          alert('Eroare la confirmare: ' + err.message);
+        });
       },
       onDeletePending: function(id) {
         setConfirm({
           msg: 'Refuzi si stergi aceasta cerere de rezervare?',
           okLbl: 'Refuza',
           ok: function() {
-            fb.remove('reservations/' + id);
+            fb.remove('reservations/' + id).catch(function(err) {
+              console.error('onDeletePending error:', err);
+              alert('Eroare la stergere: ' + err.message);
+            });
             setConfirm(null);
           }
         });

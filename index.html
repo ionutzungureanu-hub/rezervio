@@ -118,8 +118,9 @@ a{color:#2563eb;text-decoration:none;}
 // ── FIREBASE INIT ────────────────────────────────────────────────────────────
 var PENSION_ID = null;
 var firebaseDB = null;
+var firebaseAuth = null;
 
-(function() {
+function initFirebaseAndAuthUI() {
   var config = {
     apiKey: "AIzaSyCzbX-fmQyA-cB1dZZPmU1rjJSfH70Hweg",
     authDomain: "master-rezervari.firebaseapp.com",
@@ -134,6 +135,7 @@ var firebaseDB = null;
   localStorage.setItem('fb_db_url', config.databaseURL);
 
   var fbAuth = firebase.auth(app);
+  firebaseAuth = fbAuth; // expune global pentru cod din afara acestui IIFE (ex: waitForPensionId)
   var ls = document.getElementById('login-screen');
   var errEl = document.getElementById('ls-error');
 
@@ -225,7 +227,17 @@ var firebaseDB = null;
       }
     }
   });
-})();
+}
+
+// initFirebaseAndAuthUI() acceseaza elemente DOM (login-screen, ls-go-reg, etc.)
+// care sunt definite mai jos in HTML. Daca scriptul ruleaza inainte ca acel HTML
+// sa fie parsat (document.readyState === 'loading'), asteptam DOMContentLoaded;
+// altfel (HTML deja parsat, eventual script reincarcat dinamic) rulam direct.
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initFirebaseAndAuthUI);
+} else {
+  initFirebaseAndAuthUI();
+}
 
 // ── PWA INSTALL ──────────────────────────────────────────────────────────────
 var deferredPrompt = null;
@@ -347,7 +359,7 @@ function waitForPensionId(timeoutMs) {
       if (elapsed >= timeoutMs) {
         clearInterval(iv);
         // Verificare finala: chiar e cineva logat?
-        if (firebaseAuth.currentUser) {
+        if (firebaseAuth && firebaseAuth.currentUser) {
           // E logat dar PENSION_ID nu s-a populat inca - eroare reala de date
           reject(new Error('Nu am putut determina pensiunea contului. Reincarca pagina si incearca din nou.'));
         } else {

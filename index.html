@@ -1891,6 +1891,21 @@ function Drawer(props) {
 
         h('div', { className: 'ddiv' }),
 
+        // ── SETARI PENSIUNE (nume + fotografie) ──
+        h('div', { className: 'dlbl' }, 'Setari Pensiune'),
+        h('div', { className: 'ditem', onClick: function() { props.onOpenPensionSettings(); props.onClose(); } },
+          props.pensionPhoto
+            ? h('img', { src: props.pensionPhoto, className: 'dico', style: { width: 30, height: 30, borderRadius: 8, objectFit: 'cover', flexShrink: 0 } })
+            : h('span', { className: 'dico' }, '\uD83C\uDFE1'),
+          h('div', { className: 'dtxt' },
+            h('div', { className: 'dnm' }, props.pensionName || 'Numeste pensiunea'),
+            h('div', { className: 'dsub' }, 'Nume si fotografie generala')
+          ),
+          h('span', { className: 'darr' }, '›')
+        ),
+
+        h('div', { className: 'ddiv' }),
+
         // ── ALTE OPTIUNI ──
         h('div', { className: 'dlbl' }, 'Altele'),
         h('div', { className: 'ditem', onClick: function() { props.onOpenPdf(); props.onClose(); } },
@@ -2459,6 +2474,146 @@ function ICalMgr(props) {
 }
 
 // ── MAIN APP ─────────────────────────────────────────────────────────────────
+// ── PENSION SETTINGS (nume + fotografie generala) ───────────────────────────
+// Fotografia e redimensionata client-side si salvata ca Base64 in Firebase Realtime DB
+// (nu avem Firebase Storage activ) — de aceea o limitam la o latura maxima rezonabila
+// ca sa nu depasim limitele de marime ale unei valori din DB.
+var PENSION_PHOTO_MAX_DIM = 1280; // px, latura cea mai mare dupa resize
+var PENSION_PHOTO_QUALITY = 0.78; // calitate JPEG la export
+var PENSION_PHOTO_MAX_BYTES = 700 * 1024; // ~700KB prag de avertizare (Base64 e ~33% mai mare ca originalul)
+
+function resizeImageToBase64(file) {
+  return new Promise(function(resolve, reject) {
+    if (!file) { reject(new Error('Niciun fisier selectat')); return; }
+    if (!/^image\//.test(file.type)) { reject(new Error('Fisierul trebuie sa fie o imagine (jpg, png, webp)')); return; }
+    var reader = new FileReader();
+    reader.onerror = function() { reject(new Error('Nu am putut citi fisierul')); };
+    reader.onload = function(e) {
+      var img = new Image();
+      img.onerror = function() { reject(new Error('Fisierul nu e o imagine valida')); };
+      img.onload = function() {
+        var w = img.width, h = img.height;
+        var scale = Math.min(1, PENSION_PHOTO_MAX_DIM / Math.max(w, h));
+        var tw = Math.round(w * scale), th = Math.round(h * scale);
+        var canvas = document.createElement('canvas');
+        canvas.width = tw; canvas.height = th;
+        var ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, tw, th);
+        var dataUrl;
+        try {
+          dataUrl = canvas.toDataURL('image/jpeg', PENSION_PHOTO_QUALITY);
+        } catch (err) {
+          reject(new Error('Nu am putut procesa imaginea: ' + err.message));
+          return;
+        }
+        resolve(dataUrl);
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function PensionSettings(props) {
+  var onSave = props.onSave, onClose = props.onClose;
+  var ns = useState(props.pensionName || ''); var name = ns[0], setName = ns[1];
+  var phs = useState(props.pensionPhoto || ''); var photo = phs[0], setPhoto = phs[1];
+  var prevs = useState(props.pensionPhoto || ''); var preview = prevs[0], setPreview = prevs[1];
+  var bs = useState(false); var busy = bs[0], setBusy = bs[1];
+  var es = useState(''); var err = es[0], setErr = es[1];
+  var ss = useState(false); var saving = ss[0], setSaving = ss[1];
+
+  function handleFile(e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    setErr(''); setBusy(true);
+    resizeImageToBase64(file)
+      .then(function(dataUrl) {
+        setPhoto(dataUrl);
+        setPreview(dataUrl);
+        setBusy(false);
+      })
+      .catch(function(e) {
+        setErr(e.message);
+        setBusy(false);
+      });
+    // permite re-selectarea aceluiasi fisier ulterior
+    e.target.value = '';
+  }
+
+  function handleRemovePhoto() {
+    setPhoto('');
+    setPreview('');
+  }
+
+  function handleSave() {
+    if (!name.trim()) { setErr('Introdu numele pensiunii'); return; }
+    setErr(''); setSaving(true);
+    onSave(name.trim(), photo)
+      .then(function() { setSaving(false); onClose(); })
+      .catch(function(e) { setSaving(false); setErr('Eroare la salvare: ' + e.message); });
+  }
+
+  var approxKb = photo ? Math.round((photo.length * 0.75) / 1024) : 0;
+
+  return h('div', { className: 'ov', onClick: onClose },
+    h('div', { className: 'mdl', onClick: function(e) { e.stopPropagation(); } },
+      h('div', { className: 'mhdr' },
+        h('span', { className: 'mtit' }, '\uD83C\uDFE1 Setari Pensiune'),
+        h('button', { className: 'mclose', onClick: onClose }, '\u2715')
+      ),
+      h('div', { className: 'mbody' },
+
+        h('div', { className: 'ibox', style: { marginBottom: 14 } },
+          'Numele si fotografia sunt vizibile in panoul de administrare. Fotografia se redimensioneaza automat pentru a ramane usor de incarcat.'
+        ),
+
+        err && h('div', { style: { background: '#fef2f2', border: '1.5px solid #fecaca', color: '#dc2626', borderRadius: 9, padding: '10px 14px', marginBottom: 14, fontSize: 13, fontWeight: 600 } }, err),
+
+        h('label', { className: 'flbl', style: { marginBottom: 4, display: 'block' } }, 'Nume pensiune'),
+        h('input', {
+          className: 'finp', style: { marginBottom: 18 },
+          value: name,
+          placeholder: 'ex: Casuta cu Izvor',
+          onChange: function(e) { setName(e.target.value); setErr(''); }
+        }),
+
+        h('label', { className: 'flbl', style: { marginBottom: 8, display: 'block' } }, 'Fotografie generala'),
+
+        preview
+          ? h('div', { style: { marginBottom: 12 } },
+              h('img', { src: preview, style: { width: '100%', maxHeight: 220, objectFit: 'cover', borderRadius: 12, border: '1.5px solid #e2e8f0', display: 'block' } }),
+              h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 } },
+                h('span', { style: { fontSize: 12, color: '#94a3b8' } }, approxKb > 0 ? ('\u2248 ' + approxKb + ' KB') : ''),
+                h('button', { className: 'cbtn', style: { color: '#dc2626', fontSize: 13, fontWeight: 700 }, onClick: handleRemovePhoto }, '\uD83D\uDDD1\uFE0F Sterge fotografia')
+              )
+            )
+          : h('div', { style: { border: '2px dashed #e2e8f0', borderRadius: 12, padding: '28px 14px', textAlign: 'center', color: '#94a3b8', marginBottom: 12 } },
+              h('div', { style: { fontSize: 28, marginBottom: 6 } }, '\uD83D\uDDBC\uFE0F'),
+              h('div', { style: { fontSize: 13 } }, 'Nicio fotografie incarcata')
+            ),
+
+        h('label', { style: {
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          padding: '12px', borderRadius: 10, border: '1.5px solid #2563eb', color: '#2563eb',
+          fontWeight: 700, fontSize: 14, cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1
+        } },
+          busy ? '\u23F3 Se proceseaza...' : '\uD83D\uDCF7 ' + (preview ? 'Schimba fotografia' : 'Incarca fotografie'),
+          h('input', { type: 'file', accept: 'image/*', style: { display: 'none' }, disabled: busy, onChange: handleFile })
+        ),
+
+        photo && approxKb > Math.round(PENSION_PHOTO_MAX_BYTES / 1024) && h('div', { style: { marginTop: 10, fontSize: 12, color: '#92400e', background: '#fffbeb', border: '1.5px solid #fde68a', borderRadius: 8, padding: '8px 12px' } },
+          '\u26A0\uFE0F Fotografia e destul de mare (\u2248 ' + approxKb + ' KB). Poate incarca mai greu pe conexiuni slabe — recomandam o poza mai simpla daca observi probleme.'
+        )
+      ),
+      h('div', { className: 'mfoot' },
+        h('button', { className: 'mcanc', onClick: onClose, disabled: saving }, 'Anuleaza'),
+        h('button', { className: 'msave', onClick: handleSave, disabled: saving || busy }, saving ? 'Se salveaza...' : '\u2713 Salveaza')
+      )
+    )
+  );
+}
+
 function App() {
   var ls = useState(true); var loading = ls[0], setLoading = ls[1];
   var ss = useState('online'); var sync = ss[0], setSync = ss[1];
@@ -2467,6 +2622,8 @@ function App() {
   var ros = useState(function() { return lc.get('p_rooms', DEF_ROOMS); }); var rooms = ros[0], setRooms = ros[1];
   var sos = useState(function() { return lc.get('p_src', DEF_SRC); }); var sources = sos[0], setSources = sos[1];
   var prs = useState(function() { return lc.get('p_prices', {}); }); var roomPrices = prs[0], setRoomPrices = prs[1];
+  var pns = useState(function() { return lc.get('p_name', ''); }); var pensionName = pns[0], setPensionName = pns[1];
+  var pps = useState(function() { return lc.get('p_photo', ''); }); var pensionPhoto = pps[0], setPensionPhoto = pps[1];
   var res = useState([]); var reservations = res[0], setRes = res[1];
   var ms = useState(null); var modal = ms[0], setModal = ms[1];
   var cs = useState(null); var confirm = cs[0], setConfirm = cs[1];
@@ -2475,6 +2632,7 @@ function App() {
   var ics = useState(false); var showIcal = ics[0], setShowIcal = ics[1];
   var pds = useState(false); var showPdf = pds[0], setShowPdf = pds[1];
   var prs2 = useState(false); var showPrices = prs2[0], setShowPrices = prs2[1];
+  var pss = useState(false); var showPensionSettings = pss[0], setShowPensionSettings = pss[1];
 
   useEffect(function() {
     if (!firebaseDB) { setLoading(false); return; }
@@ -2483,6 +2641,8 @@ function App() {
         if (cfg.rooms) { setRooms(cfg.rooms); lc.set('p_rooms', cfg.rooms); }
         if (cfg.sources) { setSources(cfg.sources); lc.set('p_src', cfg.sources); }
         if (cfg.roomPrices) { setRoomPrices(cfg.roomPrices); lc.set('p_prices', cfg.roomPrices); }
+        if (cfg.pensionName !== undefined) { setPensionName(cfg.pensionName); lc.set('p_name', cfg.pensionName); }
+        if (cfg.pensionPhoto !== undefined) { setPensionPhoto(cfg.pensionPhoto); lc.set('p_photo', cfg.pensionPhoto); }
       }
     });
     var u2 = fb.on('reservations', function(data) {
@@ -2496,11 +2656,12 @@ function App() {
     return function() { u1(); u2(); };
   }, []);
 
-  function saveConfig(r, s, prices) {
+  // saveConfig face MERGE peste config-ul existent (nu overwrite), ca sa nu piarda
+  // campuri precum pensionName/pensionPhoto cand se salveaza doar camere/surse, sau invers.
+  function saveConfig(partial) {
     setSync('syncing');
-    var cfg = { rooms: r, sources: s };
-    if (prices !== undefined) cfg.roomPrices = prices;
-    return fb.set('config', cfg).then(function() { setSync('online'); }).catch(function(err) {
+    var merged = Object.assign({}, { rooms: rooms, sources: sources, roomPrices: roomPrices, pensionName: pensionName, pensionPhoto: pensionPhoto }, partial);
+    return fb.set('config', merged).then(function() { setSync('online'); }).catch(function(err) {
       console.error('saveConfig error:', err);
       setSync('error');
       setTimeout(function() { setSync('online'); }, 4000);
@@ -2571,7 +2732,7 @@ function App() {
     var del = rooms.filter(function(r) { return !newR.includes(r); });
     var promises = del.length ? reservations.filter(function(r) { return del.includes(r.room); }).map(function(r) { return fb.remove('reservations/' + r.id); }) : [];
     Promise.all(promises).then(function() {
-      return saveConfig(newR, sources, roomPrices);
+      return saveConfig({ rooms: newR });
     }).then(function() {
       setRooms(newR); lc.set('p_rooms', newR);
       setShowRooms(false);
@@ -2582,11 +2743,18 @@ function App() {
   }
 
   function saveSrc(newS) {
-    saveConfig(rooms, newS, roomPrices).then(function() {
+    saveConfig({ sources: newS }).then(function() {
       setSources(newS); lc.set('p_src', newS);
       setShowSrc(false);
     }).catch(function(err) {
       console.error('saveSrc error:', err);
+    });
+  }
+
+  function savePensionSettings(name, photo) {
+    return saveConfig({ pensionName: name, pensionPhoto: photo }).then(function() {
+      setPensionName(name); lc.set('p_name', name);
+      setPensionPhoto(photo); lc.set('p_photo', photo);
     });
   }
 
@@ -2632,12 +2800,14 @@ function App() {
     drawerOpen && h(Drawer, {
       tab: tab, setTab: setTab, sources: sources, rooms: rooms, conflicts: conflicts,
       syncColor: syncColor, syncLabel: syncLabel,
+      pensionName: pensionName, pensionPhoto: pensionPhoto,
       pendingCount: reservations.filter(function(r){ return r.pendingConfirmation; }).length,
       onOpenSrc: function() { setShowSrc(true); },
       onOpenRooms: function() { setShowRooms(true); },
       onOpenIcal: function() { setShowIcal(true); },
       onOpenPdf: function() { setShowPdf(true); },
       onOpenPrices: function() { setShowPrices(true); },
+      onOpenPensionSettings: function() { setShowPensionSettings(true); },
       onClose: function() { setDrawerOpen(false); }
     }),
     // PENDING BANNER
@@ -2669,15 +2839,16 @@ function App() {
     modal && h(ResMdl, { modal: modal, onSave: saveRes, onClose: function() { setModal(null); }, rooms: rooms, sources: sources, reservations: reservations }),
     showRooms && h(RoomMgr, { rooms: rooms, reservations: reservations, onSave: saveRooms, onClose: function() { setShowRooms(false); } }),
     showSrc && h(SrcMgr, { sources: sources, onSave: saveSrc, onClose: function() { setShowSrc(false); } }),
+    showPensionSettings && h(PensionSettings, { pensionName: pensionName, pensionPhoto: pensionPhoto, onSave: savePensionSettings, onClose: function() { setShowPensionSettings(false); } }),
     showIcal && h(ICalMgr, { rooms: rooms, reservations: reservations, onClose: function() { setShowIcal(false); }, onSync: function() {} }),
     showPdf && h(PdfExport, { rooms: rooms, sources: sources, reservations: reservations, onClose: function() { setShowPdf(false); } }),
     showPrices && h(PricesMgr, {
       rooms: rooms,
       roomPrices: roomPrices,
-      pensionName: 'Casuta cu Izvor',
+      pensionName: pensionName || 'Pensiune',
       pendingRes: reservations.filter(function(r){ return r.pendingConfirmation; }),
       onSave: function(newPrices) {
-        saveConfig(rooms, sources, newPrices).then(function() {
+        saveConfig({ roomPrices: newPrices }).then(function() {
           setRoomPrices(newPrices);
           lc.set('p_prices', newPrices);
         }).catch(function(err) { console.error('PricesMgr save error:', err); });

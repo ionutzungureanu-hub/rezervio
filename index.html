@@ -214,8 +214,15 @@ var firebaseDB = null;
         });
     } else {
       // Nu e logat - arata login screen
-      ls.style.display = 'flex';
+      var wasRunning = appStarted;
       PENSION_ID = null;
+      ls.style.display = 'flex';
+      // Daca aplicatia era deja pornita (userul era logat si s-a delogat / sesiunea a expirat
+      // in timp ce folosea aplicatia), facem reload curat ca sa nu ramana React montat cu
+      // date vechi in fundal in spatele ecranului de login.
+      if (wasRunning) {
+        setTimeout(function() { window.location.reload(); }, 300);
+      }
     }
   });
 })();
@@ -321,6 +328,36 @@ var lc = {
 };
 
 // ── FIREBASE OPS ─────────────────────────────────────────────────────────────
+// Promisiune care se rezolva cand PENSION_ID e disponibil, sau se respinge
+// daca dupa un timp rezonabil tot nu avem un user autentificat. Asta evita
+// esecuri false-pozitive cand Firebase Auth inca isi restaureaza sesiunea
+// din IndexedDB (poate dura cateva sute de ms la incarcarea paginii).
+function waitForPensionId(timeoutMs) {
+  if (PENSION_ID) return Promise.resolve(PENSION_ID);
+  return new Promise(function(resolve, reject) {
+    var elapsed = 0;
+    var step = 100;
+    var iv = setInterval(function() {
+      if (PENSION_ID) {
+        clearInterval(iv);
+        resolve(PENSION_ID);
+        return;
+      }
+      elapsed += step;
+      if (elapsed >= timeoutMs) {
+        clearInterval(iv);
+        // Verificare finala: chiar e cineva logat?
+        if (firebaseAuth.currentUser) {
+          // E logat dar PENSION_ID nu s-a populat inca - eroare reala de date
+          reject(new Error('Nu am putut determina pensiunea contului. Reincarca pagina si incearca din nou.'));
+        } else {
+          reject(new Error('Sesiunea ta a expirat sau nu esti autentificat. Reincarca pagina si autentifica-te din nou.'));
+        }
+      }
+    }, step);
+  });
+}
+
 var fb = {
   on: function(path, cb) {
     if (!PENSION_ID) { console.warn('fb.on called before PENSION_ID set:', path); return function(){}; }
@@ -329,16 +366,19 @@ var fb = {
     return function() { ref.off('value'); };
   },
   set: function(path, val) {
-    if (!PENSION_ID) return Promise.reject(new Error('Nu esti autentificat (PENSION_ID lipsa). Reincarca pagina.'));
-    return firebaseDB.ref('pensions/' + PENSION_ID + '/' + path).set(val);
+    return waitForPensionId(3000).then(function(pid) {
+      return firebaseDB.ref('pensions/' + pid + '/' + path).set(val);
+    });
   },
   push: function(path, val) {
-    if (!PENSION_ID) return Promise.reject(new Error('Nu esti autentificat (PENSION_ID lipsa). Reincarca pagina.'));
-    return firebaseDB.ref('pensions/' + PENSION_ID + '/' + path).push(val).then(function(r) { return r.key; });
+    return waitForPensionId(3000).then(function(pid) {
+      return firebaseDB.ref('pensions/' + pid + '/' + path).push(val).then(function(r) { return r.key; });
+    });
   },
   remove: function(path) {
-    if (!PENSION_ID) return Promise.reject(new Error('Nu esti autentificat (PENSION_ID lipsa). Reincarca pagina.'));
-    return firebaseDB.ref('pensions/' + PENSION_ID + '/' + path).remove();
+    return waitForPensionId(3000).then(function(pid) {
+      return firebaseDB.ref('pensions/' + pid + '/' + path).remove();
+    });
   }
 };
 

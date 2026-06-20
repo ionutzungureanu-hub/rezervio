@@ -2038,6 +2038,16 @@ function Drawer(props) {
           ),
           h('span', { className: 'darr' }, '›')
         ),
+        h('div', { className: 'ditem', onClick: function() { props.onOpenBillingInfo(); props.onClose(); } },
+          h('span', { className: 'dico' }, '\uD83E\uDDFE'),
+          h('div', { className: 'dtxt' },
+            h('div', { className: 'dnm' }, props.billingInfo
+              ? (props.billingInfo.type === 'pj' ? (props.billingInfo.companyName || 'Date facturare') : (props.billingInfo.fullName || 'Date facturare'))
+              : 'Date Facturare'),
+            h('div', { className: 'dsub' }, props.billingInfo ? 'Date complete' : 'Persoana fizica sau firma')
+          ),
+          h('span', { className: 'darr' }, '›')
+        ),
 
         h('div', { className: 'ddiv' }),
 
@@ -2866,6 +2876,164 @@ function AccountSettings(props) {
   );
 }
 
+// ── BILLING INFO (date firma/persoana, pregatire pentru facturare viitoare) ──
+// IMPORTANT: aceasta sectiune NU emite facturi si NU proceseaza plati — doar colecteaza
+// si stocheaza datele necesare pentru facturare, ca atunci cand se activeaza un provider
+// de plati (Stripe/Smartbill etc, vezi roadmap SaaS) sa nu fie nevoie sa migram retroactiv
+// utilizatorii existenti si sa le cerem din nou aceste date.
+
+// Validare CNP: 13 cifre, cu cifra de control conform algoritmului oficial.
+// Nu blocheaza salvarea daca esueaza — doar avertizeaza, ca sa nu frustram userul
+// pe un caz marginal (CNP strain, format vechi etc).
+function isValidCNP(cnp) {
+  if (!/^\d{13}$/.test(cnp)) return false;
+  var weights = [2, 7, 9, 1, 4, 6, 3, 5, 8, 2, 7, 9];
+  var sum = 0;
+  for (var i = 0; i < 12; i++) sum += parseInt(cnp[i], 10) * weights[i];
+  var ctrl = sum % 11;
+  if (ctrl === 10) ctrl = 1;
+  return ctrl === parseInt(cnp[12], 10);
+}
+
+// Validare CUI: 2-10 cifre, cu cifra de control conform algoritmului ANAF.
+// Acceptam si cu prefix "RO" (platitor de TVA) — il curatam inainte de validare.
+function isValidCUI(cuiRaw) {
+  var cui = (cuiRaw || '').toUpperCase().replace(/^RO/, '').trim();
+  if (!/^\d{2,10}$/.test(cui)) return false;
+  var weights = [7, 5, 3, 2, 1, 7, 5, 3, 2];
+  var digits = cui.slice(0, -1).padStart(9, '0').split('').map(Number);
+  var ctrlDigit = parseInt(cui.slice(-1), 10);
+  var sum = 0;
+  for (var i = 0; i < 9; i++) sum += digits[i] * weights[i];
+  var rest = (sum * 10) % 11;
+  if (rest === 10) rest = 0;
+  return rest === ctrlDigit;
+}
+
+function BillingInfo(props) {
+  var onSave = props.onSave, onClose = props.onClose;
+  var initial = props.billingInfo || {};
+
+  var tys = useState(initial.type || 'pf'); var entType = tys[0], setEntType = tys[1]; // 'pf' | 'pj'
+
+  // Campuri comune
+  var addrs = useState(initial.address || ''); var address = addrs[0], setAddress = addrs[1];
+  var citys = useState(initial.city || ''); var city = citys[0], setCity = citys[1];
+  var countys = useState(initial.county || ''); var county = countys[0], setCounty = countys[1];
+
+  // Campuri PF
+  var pfns = useState(initial.fullName || ''); var pfName = pfns[0], setPfName = pfns[1];
+  var cnps = useState(initial.cnp || ''); var cnp = cnps[0], setCnp = cnps[1];
+
+  // Campuri PJ
+  var cnames = useState(initial.companyName || ''); var companyName = cnames[0], setCompanyName = cnames[1];
+  var cuis = useState(initial.cui || ''); var cui = cuis[0], setCui = cuis[1];
+  var regComs = useState(initial.regCom || ''); var regCom = regComs[0], setRegCom = regComs[1];
+  var reprs = useState(initial.legalRep || ''); var legalRep = reprs[0], setLegalRep = reprs[1];
+
+  var es = useState(''); var err = es[0], setErr = es[1];
+  var ss = useState(false); var saving = ss[0], setSaving = ss[1];
+
+  function handleSave() {
+    setErr('');
+    if (!address.trim() || !city.trim()) { setErr('Completeaza adresa si orasul'); return; }
+
+    var data = { type: entType, address: address.trim(), city: city.trim(), county: county.trim() };
+
+    if (entType === 'pf') {
+      if (!pfName.trim()) { setErr('Introdu numele complet'); return; }
+      if (cnp && !isValidCNP(cnp.trim())) { setErr('CNP-ul introdus nu pare valid. Verifica cifrele sau lasa campul gol.'); return; }
+      data.fullName = pfName.trim();
+      data.cnp = cnp.trim();
+    } else {
+      if (!companyName.trim()) { setErr('Introdu denumirea firmei'); return; }
+      if (!cui.trim()) { setErr('Introdu CUI-ul firmei'); return; }
+      if (!isValidCUI(cui.trim())) { setErr('CUI-ul introdus nu pare valid. Verifica cifrele (cu sau fara prefix RO).'); return; }
+      data.companyName = companyName.trim();
+      data.cui = cui.trim().toUpperCase();
+      data.regCom = regCom.trim();
+      data.legalRep = legalRep.trim();
+    }
+
+    setSaving(true);
+    onSave(data)
+      .then(function() { setSaving(false); onClose(); })
+      .catch(function(e) { setSaving(false); setErr('Eroare la salvare: ' + e.message); });
+  }
+
+  var toggleBtnStyle = function(active) { return {
+    flex: 1, padding: '11px 4px', borderRadius: 9, fontSize: 14, fontWeight: 700,
+    background: active ? '#2563eb' : '#f1f5f9',
+    color: active ? '#fff' : '#64748b',
+    border: 'none', cursor: 'pointer'
+  }; };
+
+  return h('div', { className: 'ov', onClick: onClose },
+    h('div', { className: 'mdl', onClick: function(e) { e.stopPropagation(); } },
+      h('div', { className: 'mhdr' },
+        h('span', { className: 'mtit' }, '\uD83E\uDDFE Date Facturare'),
+        h('button', { className: 'mclose', onClick: onClose }, '\u2715')
+      ),
+      h('div', { className: 'mbody' },
+
+        h('div', { className: 'ibox', style: { marginBottom: 18 } },
+          'Aceste date vor fi folosite pentru emiterea facturilor de abonament, atunci cand functia de facturare va fi activata. Momentan nu se proceseaza nicio plata.'
+        ),
+
+        err && h('div', { style: { background: '#fef2f2', border: '1.5px solid #fecaca', color: '#dc2626', borderRadius: 9, padding: '10px 14px', marginBottom: 16, fontSize: 13, fontWeight: 600 } }, err),
+
+        // Toggle PF / PJ
+        h('div', { style: { display: 'flex', gap: 8, marginBottom: 20 } },
+          h('button', { style: toggleBtnStyle(entType === 'pf'), onClick: function() { setEntType('pf'); setErr(''); } }, '\uD83D\uDC64 Persoana fizica'),
+          h('button', { style: toggleBtnStyle(entType === 'pj'), onClick: function() { setEntType('pj'); setErr(''); } }, '\uD83C\uDFE2 Persoana juridica (firma)')
+        ),
+
+        entType === 'pf'
+          ? h('div', null,
+              h('label', { className: 'flbl', style: { marginBottom: 4, display: 'block' } }, 'Nume si prenume'),
+              h('input', { className: 'finp', style: { marginBottom: 14 }, value: pfName, placeholder: 'ex: Ion Popescu', onChange: function(e) { setPfName(e.target.value); setErr(''); } }),
+
+              h('label', { className: 'flbl', style: { marginBottom: 4, display: 'block' } }, 'CNP (optional)'),
+              h('input', { className: 'finp', style: { marginBottom: 14 }, value: cnp, placeholder: '13 cifre', maxLength: 13, inputMode: 'numeric', onChange: function(e) { setCnp(e.target.value.replace(/\D/g, '')); setErr(''); } })
+            )
+          : h('div', null,
+              h('label', { className: 'flbl', style: { marginBottom: 4, display: 'block' } }, 'Denumire firma'),
+              h('input', { className: 'finp', style: { marginBottom: 14 }, value: companyName, placeholder: 'ex: Casa cu Dor SRL', onChange: function(e) { setCompanyName(e.target.value); setErr(''); } }),
+
+              h('label', { className: 'flbl', style: { marginBottom: 4, display: 'block' } }, 'CUI / CIF'),
+              h('input', { className: 'finp', style: { marginBottom: 14 }, value: cui, placeholder: 'ex: RO12345678 sau 12345678', onChange: function(e) { setCui(e.target.value); setErr(''); } }),
+
+              h('label', { className: 'flbl', style: { marginBottom: 4, display: 'block' } }, 'Nr. Registrul Comertului (optional)'),
+              h('input', { className: 'finp', style: { marginBottom: 14 }, value: regCom, placeholder: 'ex: J40/1234/2020', onChange: function(e) { setRegCom(e.target.value); setErr(''); } }),
+
+              h('label', { className: 'flbl', style: { marginBottom: 4, display: 'block' } }, 'Reprezentant legal (optional)'),
+              h('input', { className: 'finp', style: { marginBottom: 14 }, value: legalRep, placeholder: 'ex: Ion Popescu, Administrator', onChange: function(e) { setLegalRep(e.target.value); setErr(''); } })
+            ),
+
+        h('div', { className: 'ddiv', style: { margin: '4px 0 18px' } }),
+
+        h('label', { className: 'flbl', style: { marginBottom: 4, display: 'block' } }, 'Adresa (strada, numar)'),
+        h('input', { className: 'finp', style: { marginBottom: 14 }, value: address, placeholder: 'ex: Str. Principala nr. 10', onChange: function(e) { setAddress(e.target.value); setErr(''); } }),
+
+        h('div', { style: { display: 'flex', gap: 10, marginBottom: 4 } },
+          h('div', { style: { flex: 1 } },
+            h('label', { className: 'flbl', style: { marginBottom: 4, display: 'block' } }, 'Oras'),
+            h('input', { className: 'finp', value: city, placeholder: 'ex: Brasov', onChange: function(e) { setCity(e.target.value); setErr(''); } })
+          ),
+          h('div', { style: { flex: 1 } },
+            h('label', { className: 'flbl', style: { marginBottom: 4, display: 'block' } }, 'Judet'),
+            h('input', { className: 'finp', value: county, placeholder: 'ex: Brasov', onChange: function(e) { setCounty(e.target.value); } })
+          )
+        )
+      ),
+      h('div', { className: 'mfoot' },
+        h('button', { className: 'mcanc', onClick: onClose, disabled: saving }, 'Anuleaza'),
+        h('button', { className: 'msave', onClick: handleSave, disabled: saving }, saving ? 'Se salveaza...' : '\u2713 Salveaza')
+      )
+    )
+  );
+}
+
 function App() {
   var ls = useState(true); var loading = ls[0], setLoading = ls[1];
   var ss = useState('online'); var sync = ss[0], setSync = ss[1];
@@ -2886,6 +3054,8 @@ function App() {
   var prs2 = useState(false); var showPrices = prs2[0], setShowPrices = prs2[1];
   var pss = useState(false); var showPensionSettings = pss[0], setShowPensionSettings = pss[1];
   var acs = useState(false); var showAccountSettings = acs[0], setShowAccountSettings = acs[1];
+  var bis = useState(null); var billingInfo = bis[0], setBillingInfo = bis[1];
+  var sbi = useState(false); var showBillingInfo = sbi[0], setShowBillingInfo = sbi[1];
 
   useEffect(function() {
     if (!firebaseDB) { setLoading(false); return; }
@@ -2907,6 +3077,17 @@ function App() {
       else setSync('online');
     });
     return function() { u1(); u2(); };
+  }, []);
+
+  // Date de facturare: legate de USER (cont), nu de pensiune — separat de fb.on() de mai sus,
+  // care e mereu scopat pe pensions/{PENSION_ID}. Aici ascultam direct users/{uid}/billingInfo.
+  useEffect(function() {
+    var user = firebase.auth().currentUser;
+    if (!firebaseDB || !user) return;
+    var ref = firebaseDB.ref('users/' + user.uid + '/billingInfo');
+    var cb = function(snap) { setBillingInfo(snap.val() || null); };
+    ref.on('value', cb, function(err) { console.warn('billingInfo read error:', err); });
+    return function() { ref.off('value', cb); };
   }, []);
 
   // saveConfig face MERGE peste config-ul existent (nu overwrite), ca sa nu piarda
@@ -3011,6 +3192,20 @@ function App() {
     });
   }
 
+  // Datele de facturare se scriu sub users/{uid}, NU sub pensions/{PENSION_ID} — sunt legate
+  // de persoana/firma care detine contul, nu de pensiune (relevant mai ales daca un cont va
+  // putea gestiona multiple pensiuni in viitor).
+  function saveBillingInfo(data) {
+    var user = firebase.auth().currentUser;
+    if (!user) return Promise.reject(new Error('Nu esti autentificat. Reincarca pagina.'));
+    return firebaseDB.ref('users/' + user.uid + '/billingInfo').set(data)
+      .then(function() { setBillingInfo(data); })
+      .catch(function(err) {
+        console.error('saveBillingInfo error:', err);
+        throw err;
+      });
+  }
+
   function openNew(room) { setModal({ mode: 'new', data: Object.assign({}, EMPTY_RES, { room: room || '', source: sources[0] || '' }) }); }
   function openEdit(r) { setModal({ mode: 'edit', data: Object.assign({}, r) }); }
   function openCopy(r) { setModal({ mode: 'copy', data: Object.assign({}, r, { id: null }) }); }
@@ -3060,6 +3255,7 @@ function App() {
       syncColor: syncColor, syncLabel: syncLabel,
       pensionName: pensionName, pensionPhoto: pensionPhoto,
       userEmail: (firebase.auth().currentUser && firebase.auth().currentUser.email) || '',
+      billingInfo: billingInfo,
       pendingCount: reservations.filter(function(r){ return r.pendingConfirmation; }).length,
       onOpenSrc: function() { setShowSrc(true); },
       onOpenRooms: function() { setShowRooms(true); },
@@ -3068,6 +3264,7 @@ function App() {
       onOpenPrices: function() { setShowPrices(true); },
       onOpenPensionSettings: function() { setShowPensionSettings(true); },
       onOpenAccountSettings: function() { setShowAccountSettings(true); },
+      onOpenBillingInfo: function() { setShowBillingInfo(true); },
       onClose: function() { setDrawerOpen(false); }
     }),
     // PENDING BANNER
@@ -3101,6 +3298,7 @@ function App() {
     showSrc && h(SrcMgr, { sources: sources, onSave: saveSrc, onClose: function() { setShowSrc(false); } }),
     showPensionSettings && h(PensionSettings, { pensionName: pensionName, pensionPhoto: pensionPhoto, onSave: savePensionSettings, onClose: function() { setShowPensionSettings(false); } }),
     showAccountSettings && h(AccountSettings, { onClose: function() { setShowAccountSettings(false); } }),
+    showBillingInfo && h(BillingInfo, { billingInfo: billingInfo, onSave: saveBillingInfo, onClose: function() { setShowBillingInfo(false); } }),
     showIcal && h(ICalMgr, { rooms: rooms, reservations: reservations, onClose: function() { setShowIcal(false); }, onSync: function() {} }),
     showPdf && h(PdfExport, { rooms: rooms, sources: sources, reservations: reservations, onClose: function() { setShowPdf(false); } }),
     showPrices && h(PricesMgr, {

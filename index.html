@@ -258,6 +258,18 @@ function initFirebaseAndAuthUI() {
 
   // Auth state change - PUNCTUL CENTRAL
   var appStarted = false;
+  function tryStartApp() {
+    if (appStarted) return;
+    if (typeof window.startApp !== 'function') {
+      // Defensiv: al doilea <script> (unde e definit window.startApp) nu a rulat inca.
+      // In practica nu ar trebui sa se intample (onAuthStateChanged e mereu async, deci
+      // vine dupa parsarea completa a paginii), dar reincercam scurt in loc sa picam silentios.
+      setTimeout(tryStartApp, 50);
+      return;
+    }
+    appStarted = true;
+    window.startApp();
+  }
   fbAuth.onAuthStateChanged(function(user) {
     if (user) {
       // Logat - gaseste pensionId si porneste React App
@@ -269,12 +281,12 @@ function initFirebaseAndAuthUI() {
             firebaseDB.ref('users/' + user.uid).set({ email: user.email, pensionName: 'Pensiunea Mea', pensionId: PENSION_ID, role: 'admin', createdAt: Date.now() }).catch(function(){});
           }
           ls.style.display = 'none';
-          if (!appStarted) { appStarted = true; startApp(); }
+          tryStartApp();
         })
         .catch(function() {
           PENSION_ID = 'p_' + user.uid.slice(0, 8);
           ls.style.display = 'none';
-          if (!appStarted) { appStarted = true; startApp(); }
+          tryStartApp();
         });
     } else {
       // Nu e logat - arata login screen
@@ -1083,6 +1095,8 @@ function ResTab(props) {
   var rooms = props.rooms, sources = props.sources, reservations = props.reservations;
   var conflicts = props.conflicts;
   var ds = useState(null); var detailRes = ds[0], setDetailRes = ds[1];
+  // 'general' = toate camerele amestecate; 'room' = grupat pe camera (camera ca sub-sectiune)
+  var vms = useState('general'); var viewMode = vms[0], setViewMode = vms[1];
 
   var confIds = useMemo(function() {
     var ids = new Set();
@@ -1090,47 +1104,100 @@ function ResTab(props) {
     return ids;
   }, [conflicts]);
 
-  // Toate rezervarile active/viitoare, sortate dupa data intrarii (cele mai apropiate primele)
-  var active = useMemo(function() {
-    return reservations
-      .filter(isActiveFuture)
-      .sort(function(a, b) {
-        if ((a.checkIn || '') < (b.checkIn || '')) return -1;
-        if ((a.checkIn || '') > (b.checkIn || '')) return 1;
-        // La aceeasi data, sorteaza dupa camera
-        return (a.room || '') < (b.room || '') ? -1 : 1;
-      });
-  }, [reservations]);
-
   var today = todayStr();
 
-  // Grupeaza in "Astazi/Maine", "Aceasta saptamana", "Urmatoarele" si pe camere
-  var todayRes = active.filter(function(r) { return r.checkIn === today || r.checkIn === addDays(today, 1); });
-  var laterRes = active.filter(function(r) { return r.checkIn !== today && r.checkIn !== addDays(today, 1); });
+  // ── CELE 4 CATEGORII ─────────────────────────────────────────────────────
+  // O rezervare poate fi simultan "intrare azi" SI "iesire azi" (sejur de 0 nopti /
+  // aceeasi zi) — categoriile nu sunt neaparat mutual exclusive intre ele, dar fiecare
+  // rezervare apare o singura data in categoria ei "principala" pentru lista de mai jos,
+  // ca sa nu se dubleze vizual. Ordinea de prioritate: check-in azi > check-out azi >
+  // cazat in curs > viitor.
+  var categorized = useMemo(function() {
+    var checkinToday = [], checkoutToday = [], staying = [], future = [];
+    reservations.forEach(function(r) {
+      if (!r.checkIn) return;
+      var checkOut = addDays(r.checkIn, r.nights || 0);
+      if (checkOut < today) return; // sejur incheiat — nu se mai arata in lista activa
 
+      if (r.checkIn === today) {
+        checkinToday.push(r);
+      } else if (checkOut === today) {
+        checkoutToday.push(r);
+      } else if (r.checkIn < today && checkOut > today) {
+        staying.push(r);
+      } else if (r.checkIn > today) {
+        future.push(r);
+      }
+    });
+    var byCheckIn = function(a, b) { return (a.checkIn || '') < (b.checkIn || '') ? -1 : (a.checkIn || '') > (b.checkIn || '') ? 1 : ((a.room || '') < (b.room || '') ? -1 : 1); };
+    checkinToday.sort(byCheckIn);
+    checkoutToday.sort(byCheckIn);
+    staying.sort(byCheckIn);
+    future.sort(byCheckIn);
+    return { checkinToday: checkinToday, checkoutToday: checkoutToday, staying: staying, future: future };
+  }, [reservations, today]);
+
+  var totalActive = categorized.checkinToday.length + categorized.checkoutToday.length + categorized.staying.length + categorized.future.length;
+
+  function rowProps(res) {
+    return {
+      key: res.id, res: res, sources: sources,
+      onDetail: function() { setDetailRes(res); },
+      onEdit: props.onEdit,
+      onCopy: props.onCopy,
+      onMove: props.onMove,
+      onDelete: props.onDelete
+    };
+  }
+
+  // Randeaza o sectiune (Intrari azi / Iesiri azi / etc), optional impartita pe camere
+  // daca viewMode === 'room'.
   function renderSection(title, icon, list, bgColor) {
     if (list.length === 0) return null;
+    var body;
+    if (viewMode === 'room') {
+      var byRoom = {};
+      list.forEach(function(r) {
+        var rm = r.room || '(fara camera)';
+        if (!byRoom[rm]) byRoom[rm] = [];
+        byRoom[rm].push(r);
+      });
+      // Pastreaza ordinea camerelor asa cum sunt definite in config, plus orice camera extra gasita in date
+      var roomOrder = rooms.concat(Object.keys(byRoom).filter(function(r) { return rooms.indexOf(r) === -1; }));
+      body = roomOrder.filter(function(rm) { return byRoom[rm] && byRoom[rm].length; }).map(function(rm) {
+        return h('div', { key: rm, style: { marginBottom: 10 } },
+          h('div', { style: { fontSize: 12.5, fontWeight: 700, color: '#64748b', padding: '4px 4px', display: 'flex', alignItems: 'center', gap: 6 } },
+            '\uD83D\uDEAA ' + rm, h('span', { style: { opacity: .6, fontWeight: 600 } }, '(' + byRoom[rm].length + ')')
+          ),
+          byRoom[rm].map(function(res) { return h(ResRow, rowProps(res)); })
+        );
+      });
+    } else {
+      body = list.map(function(res) { return h(ResRow, rowProps(res)); });
+    }
     return h('div', { style: { marginBottom: 20 } },
       h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: bgColor || '#1e3a5f', borderRadius: 10, color: '#fff', marginBottom: 8 } },
         h('span', { style: { fontWeight: 800, fontSize: 15 } }, icon + ' ' + title),
         h('span', { style: { fontSize: 13, opacity: .8 } }, list.length + ' rez.')
       ),
-      list.map(function(res) {
-        return h(ResRow, {
-          key: res.id, res: res, sources: sources,
-          onDetail: function() { setDetailRes(res); },
-          onEdit: props.onEdit,
-          onCopy: props.onCopy,
-          onMove: props.onMove,
-          onDelete: props.onDelete
-        });
-      })
+      body
     );
   }
 
   return h('div', { className: 'page' },
     // Buton adauga nou
-    h('div', { style: { display: 'flex', justifyContent: 'flex-end', marginBottom: 12 } },
+    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 8, flexWrap: 'wrap' } },
+      // Toggle General / Pe camere
+      h('div', { style: { display: 'flex', background: '#f1f5f9', borderRadius: 10, padding: 3, gap: 2 } },
+        h('button', {
+          style: { padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer', background: viewMode === 'general' ? '#fff' : 'none', color: viewMode === 'general' ? '#2563eb' : '#64748b', boxShadow: viewMode === 'general' ? '0 1px 4px rgba(0,0,0,.1)' : 'none' },
+          onClick: function() { setViewMode('general'); }
+        }, '\uD83D\uDCCB General'),
+        h('button', {
+          style: { padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 700, border: 'none', cursor: 'pointer', background: viewMode === 'room' ? '#fff' : 'none', color: viewMode === 'room' ? '#2563eb' : '#64748b', boxShadow: viewMode === 'room' ? '0 1px 4px rgba(0,0,0,.1)' : 'none' },
+          onClick: function() { setViewMode('room'); }
+        }, '\uD83D\uDEAA Pe camere')
+      ),
       h('button', {
         style: { padding: '10px 20px', background: '#2563eb', color: '#fff', borderRadius: 10, fontWeight: 700, fontSize: 14, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 },
         onClick: function() { props.onNew(''); }
@@ -1143,32 +1210,17 @@ function ResTab(props) {
       conflicts.map(function(c, i) { return c.room + ' (' + fmt(c.from) + ')'; }).join(', ')
     ),
 
-    active.length === 0
+    totalActive === 0
       ? h('div', { style: { textAlign: 'center', padding: '40px 20px', color: '#94a3b8' } },
           h('div', { style: { fontSize: 48, marginBottom: 12 } }, '\uD83C\uDFE1'),
           h('div', { style: { fontSize: 16, fontWeight: 600 } }, 'Nicio rezervare activa'),
           h('div', { style: { fontSize: 13, marginTop: 6 } }, 'Apasa "+ Rezervare noua" pentru a adauga')
         )
       : h('div', null,
-          // Astazi si Maine
-          renderSection('Astazi si maine', '\uD83D\uDD25', todayRes, '#d97706'),
-          // Restul — pe cameră dar ordonate global după dată
-          h('div', { style: { marginBottom: 20 } },
-            laterRes.length > 0 && h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: '#1e3a5f', borderRadius: 10, color: '#fff', marginBottom: 8 } },
-              h('span', { style: { fontWeight: 800, fontSize: 15 } }, '\uD83D\uDCCB Urmatoarele rezervari'),
-              h('span', { style: { fontSize: 13, opacity: .8 } }, laterRes.length + ' rez.')
-            ),
-            laterRes.map(function(res) {
-              return h(ResRow, {
-                key: res.id, res: res, sources: sources,
-                onDetail: function() { setDetailRes(res); },
-                onEdit: props.onEdit,
-                onCopy: props.onCopy,
-                onMove: props.onMove,
-                onDelete: props.onDelete
-              });
-            })
-          )
+          renderSection('Intrari azi', '\uD83D\uDFE2', categorized.checkinToday, '#16a34a'),
+          renderSection('Iesiri azi', '\uD83D\uDD34', categorized.checkoutToday, '#dc2626'),
+          renderSection('Cazati in curs', '\uD83C\uDFE8', categorized.staying, '#2563eb'),
+          renderSection('Intrari viitoare', '\uD83D\uDCC5', categorized.future, '#1e3a5f')
         ),
 
     // Buton adauga per camera
@@ -3344,8 +3396,21 @@ function App() {
 function startApp() {
   createRoot(document.getElementById('root')).render(h(App));
 }
+// Expus global: onAuthStateChanged (primul <script> din pagina, ruleaza inainte
+// ca acest al doilea script sa fie parsat) are nevoie sa apeleze startApp() dupa
+// ce PENSION_ID e populat. Fara window.startApp explicit, primul script ar arunca
+// "ReferenceError: startApp is not defined" (acelasi tip de bug ca firebaseAuth
+// rezolvat anterior) — eroarea oprea silentios fluxul de auth, ceea ce a dus la
+// "solutia" gresita de mai jos: apelarea necondiționata a lui startApp().
+window.startApp = startApp;
 
-startApp();
+// NU apelam startApp() aici necondiționat — App trebuie montat DOAR dupa ce
+// onAuthStateChanged (mai sus in fisier) a populat PENSION_ID. Altfel useEffect-ul
+// din App care asculta fb.on('reservations'/'config') ruleaza cu PENSION_ID inca
+// null, fb.on() returneaza un no-op silentios (vezi definitia lui fb.on), si
+// pagina ramane "oarba" la schimbari din Firebase pentru tot restul sesiunii —
+// scrierile (fb.push/fb.set) merg cu succes (asteapta explicit PENSION_ID),
+// dar nimic nu mai apare vizual dupa salvare.
 })();
 </script>
 </body>

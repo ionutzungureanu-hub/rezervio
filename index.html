@@ -750,7 +750,26 @@ var cssText = [
   '.sim-info{font-size:13px;color:#64748b;padding:6px 0 10px;display:flex;align-items:center;gap:8px;}',
   '.tpl-item{background:#f8fafc;border:1.5px solid #e2e8f0;border-radius:12px;padding:11px 13px;margin-bottom:8px;display:flex;align-items:center;gap:10px;}',
   '.tpl-name{font-weight:700;font-size:14px;color:#1a202c;}',
-  '.tpl-prev{font-size:12px;color:#94a3b8;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}'
+  '.tpl-prev{font-size:12px;color:#94a3b8;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
+  // ROW HAMBURGER MENU
+  '.row-menu-btn{background:none;border:none;cursor:pointer;font-size:22px;font-weight:900;color:#94a3b8;padding:0 4px;line-height:1;flex-shrink:0;border-radius:6px;transition:background .15s;}',
+  '.row-menu-btn:active{background:#f1f5f9;}',
+  '.row-menu{position:absolute;top:0;right:0;left:0;z-index:90;}',
+  '.row-menu-inner{position:absolute;top:0;right:0;background:#fff;border-radius:14px;box-shadow:0 8px 32px rgba(0,0,0,.18),0 2px 8px rgba(0,0,0,.1);min-width:260px;overflow:hidden;border:1.5px solid #e2e8f0;}',
+  '.row-menu-hdr{padding:12px 14px 10px;border-bottom:1.5px solid #f1f5f9;display:flex;flex-direction:column;gap:2px;}',
+  '.row-menu-comm{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:10px 10px 8px;}',
+  '.row-comm-btn{display:flex;flex-direction:column;align-items:center;gap:5px;padding:10px 6px;border-radius:10px;font-size:11px;font-weight:700;text-decoration:none;border:none;cursor:pointer;min-height:58px;justify-content:center;}',
+  '.row-comm-btn.call{background:#dbeafe;color:#1d4ed8;}',
+  '.row-comm-btn.wa{background:#dcfce7;color:#15803d;}',
+  '.row-comm-btn.sms{background:#f3e8ff;color:#6d28d9;}',
+  '.row-comm-btn.tpl{background:#fff7ed;color:#c2410c;}',
+  '.row-menu-divider{height:1px;background:#f1f5f9;margin:0 10px;}',
+  '.row-menu-actions{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:8px 10px 10px;}',
+  '.row-act-btn{display:flex;flex-direction:column;align-items:center;gap:5px;padding:10px 4px;border-radius:10px;font-size:11px;font-weight:700;border:none;cursor:pointer;min-height:58px;justify-content:center;background:#f8fafc;color:#374151;}',
+  '.row-act-btn.edit{background:#eff6ff;color:#2563eb;}',
+  '.row-act-btn.copy{background:#f5f3ff;color:#7c3aed;}',
+  '.row-act-btn.move{background:#ecfeff;color:#0891b2;}',
+  '.row-act-btn.del{background:#fef2f2;color:#dc2626;}'
 ].join('');
 var styleEl = document.createElement('style');
 styleEl.textContent = cssText;
@@ -1086,38 +1105,84 @@ function ResRow(props) {
   var isTomorrow = res.checkIn === addDays(todayStr(), 1);
   var cardBg = isToday ? '#fffbeb' : isTomorrow ? '#f0f7ff' : '#fff';
 
-  return h('div', { className: 'card', style: { borderLeft: '5px solid ' + c.dot, background: cardBg } },
+  // Meniu hamburger pentru comunicare
+  var ms = useState(false); var menuOpen = ms[0], setMenuOpen = ms[1];
 
-    // ── Linia 1: Sursa | Nume | Contacte ─────────────────────────────────────
+  function closeMenu(e) { if (e) e.stopPropagation(); setMenuOpen(false); }
+
+  return h('div', { className: 'card', style: { borderLeft: '5px solid ' + c.dot, background: cardBg, position: 'relative' } },
+
+    // ── Linia 1: Sursa | Nume | Hamburger ────────────────────────────────────
     h('div', { className: 'cl1' },
       h('span', { className: 'cl1-src', style: { background: c.light, color: c.text } }, res.source || 'N/A'),
       h('span', { className: 'cl1-name' }, name),
-      res.phone
-        ? h('div', { className: 'cl1-ph', onClick: function(e) { e.stopPropagation(); } },
-            h('a', { href: phoneUrl(res.phone, ''), className: 'phb phb-c', onClick: function(e) { e.stopPropagation(); } }, h(IPhone)),
-            h('a', { href: waUrl(res.phone), target: '_blank', rel: 'noopener', className: 'phb phb-w', onClick: function(e) { e.stopPropagation(); } }, h(IWa)),
-            h('a', { href: smsUrl(res.phone), className: 'phb phb-s', onClick: function(e) { e.stopPropagation(); } }, h(ISms))
-          )
-        : h('span', { className: 'cl1-noph' }, 'fara tel.')
+      // Buton hamburger ⋮ deschide meniu comunicare
+      h('button', {
+        className: 'row-menu-btn',
+        onClick: function(e) { e.stopPropagation(); setMenuOpen(!menuOpen); },
+        title: 'Comunicare'
+      }, '⋮')
     ),
 
-    // ── Linia 2: Actiuni ──────────────────────────────────────────────────────
-    h('div', { className: 'cl2' },
-      h('button', { className: 'cl2-btn cl2-edit', onClick: function(e) { e.stopPropagation(); props.onEdit(res); } }, h(IEdit), 'Edit'),
-      h('button', { className: 'cl2-btn cl2-copy', onClick: function(e) { e.stopPropagation(); props.onCopy(res); } }, h(ICopy), 'Copiaza'),
-      h('button', { className: 'cl2-btn cl2-move', onClick: function(e) { e.stopPropagation(); props.onMove(res); } }, h(IMove), 'Muta'),
-      h('button', { className: 'cl2-btn cl2-del', onClick: function(e) { e.stopPropagation(); props.onDelete(res.id, name); } }, h(ITrash), 'Sterge')
+    // ── Meniu comunicare (dropdown) ──────────────────────────────────────────
+    menuOpen && h('div', {
+      className: 'row-menu',
+      onClick: function(e) { e.stopPropagation(); }
+    },
+      // Overlay invizibil ca sa inchida meniul la click in afara
+      h('div', { style: { position: 'fixed', inset: 0, zIndex: 89 }, onClick: closeMenu }),
+
+      h('div', { className: 'row-menu-inner' },
+        h('div', { className: 'row-menu-hdr' },
+          h('span', { style: { fontWeight: 700, fontSize: 13, color: '#1e3a5f' } }, name),
+          res.phone && h('span', { style: { fontSize: 12, color: '#64748b' } }, res.phone)
+        ),
+
+        res.phone
+          ? h('div', { className: 'row-menu-comm' },
+              h('a', {
+                href: phoneUrl(res.phone, ''),
+                className: 'row-comm-btn call',
+                onClick: closeMenu
+              }, h(IPhone), 'Suna'),
+              h('a', {
+                href: waUrl(res.phone),
+                target: '_blank', rel: 'noopener',
+                className: 'row-comm-btn wa',
+                onClick: closeMenu
+              }, h(IWa), 'WhatsApp'),
+              h('a', {
+                href: smsUrl(res.phone),
+                className: 'row-comm-btn sms',
+                onClick: closeMenu
+              }, h(ISms), 'SMS'),
+              props.onSendMsg && h('button', {
+                className: 'row-comm-btn tpl',
+                onClick: function(e) { closeMenu(e); props.onSendMsg(res); }
+              }, '\uD83D\uDCDD', 'Template')
+            )
+          : h('div', { style: { padding: '10px 12px', fontSize: 13, color: '#94a3b8', textAlign: 'center' } }, 'Fara numar de telefon'),
+
+        h('div', { className: 'row-menu-divider' }),
+
+        h('div', { className: 'row-menu-actions' },
+          h('button', { className: 'row-act-btn edit', onClick: function(e) { closeMenu(e); props.onEdit(res); } }, h(IEdit), ' Editeaza'),
+          h('button', { className: 'row-act-btn copy', onClick: function(e) { closeMenu(e); props.onCopy(res); } }, h(ICopy), ' Copiaza'),
+          h('button', { className: 'row-act-btn move', onClick: function(e) { closeMenu(e); props.onMove(res); } }, h(IMove), ' Muta'),
+          h('button', { className: 'row-act-btn del', onClick: function(e) { closeMenu(e); props.onDelete(res.id, name); } }, h(ITrash), ' Sterge')
+        )
+      )
     ),
 
-    // ── Linia 3: Camera | Perioada ────────────────────────────────────────────
+    // ── Linia 3: Camera | Perioada | Detalii ─────────────────────────────────
     h('div', { className: 'cl3', onClick: props.onDetail },
       h('span', { className: 'cl3-room' }, res.room || '-'),
       h('span', { className: 'cl3-dates' },
-        fmt(res.checkIn) + ' → ' + fmt(checkOut) + ' · ' + res.nights + (res.nights === 1 ? ' n.' : ' n.')
+        fmt(res.checkIn) + ' \u2192 ' + fmt(checkOut) + ' \u00B7 ' + res.nights + ' n.'
       ),
       isToday && h('span', { className: 'cl3-badge cl3-today' }, 'AZI'),
-      isTomorrow && h('span', { className: 'cl3-badge cl3-tom' }, 'MÂINE'),
-      h('span', { className: 'cl3-hint' }, 'ℹ detalii')
+      isTomorrow && h('span', { className: 'cl3-badge cl3-tom' }, 'M\u00C2INE'),
+      h('span', { className: 'cl3-hint' }, '\u2139 detalii')
     )
   );
 }
@@ -1177,7 +1242,8 @@ function ResTab(props) {
       onEdit: props.onEdit,
       onCopy: props.onCopy,
       onMove: props.onMove,
-      onDelete: props.onDelete
+      onDelete: props.onDelete,
+      onSendMsg: props.onSendMsg
     };
   }
 
